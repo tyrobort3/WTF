@@ -7,12 +7,18 @@ from pandas import pandas as pd
 import numpy as np
 
 #get data 
-market="BTC-ETH"
+#market="BTC-ETH"
+market="BTC-OMG" #not working 
+timestamp='1499127220008'
 #market="USDT-BTC"
 #this command has error in python3.6, it is why we use python 2.7
-data=json.loads(urllib2.urlopen("https://bittrex.com/Api/v2.0/pub/market/GetTicks?marketName="+market+"&tickInterval=fiveMin").read())['result']
+data=json.loads(urllib2.urlopen("https://bittrex.com/Api/v2.0/pub/market/GetTicks?marketName="+market+"&tickInterval=fiveMin&_="+timestamp).read())['result']
 
-#1499127220008
+#it seems timestamp does not work 
+#https://bittrex.com/Api/v2.0/pub/market/GetTicks?marketName=BTC-DNT&tickInterval=thirtyMin&_=1499127220008
+
+#dt=datetime.datetime(2017, 8, 1, 23, 14, 27, 244655)
+#dt.strftime("%s")
 
 print data[0]
 
@@ -22,100 +28,89 @@ df = pd.DataFrame(data).set_index("T")
 
 df.index = pd.DatetimeIndex(df.index)
 
-
-
-
-
-#example price>sma20
-#define signal, return, strategy
-sma20 =df['C'].rolling(20).mean()
-
-a=pd.concat([df['C'],sma20],axis=1)
-a.plot()
-
-signal_cols=[]
-
-for i in [20]:
-	col='signal_%s' %i
-	df[col]= (df['C'] > sma20)*1
-	signal_cols.append(col)  
-
 #define returns 
 df['returns'] = np.log(df['C'] / df['C'].shift(1))
-
-for col in signal_cols:
-	strat='mystrategy_%s' % col.split('_')[1]
-	df[strat]=df[col].shift(1) * df['returns']
-
-
-df[strat].dropna().cumsum().apply(np.exp).plot()
-
-plt.title('my code')
-
-plt.show()
-
-col_name=['returns', 'mystrategy_20']
-
-df[col_name].dropna().cumsum().apply(np.exp).plot()
-
-plt.title('market return vs. sma20')
-
-return_vec=df[col_name].dropna().cumsum().apply(np.exp)
-
+#24hour V 
+df['24hour_V']=df['BV'].rolling(288,min_periods=288).sum() 
+df['24hour_V_gt']=(df['24hour_V']>=300)
+df.describe()
 
 #buy #define rolling volume, diff , if diff> threshold, buy
 num_windows=[12] #one hour, 60/5
 thre_s=[1,0.1]
 refresh_s=[1]
 v_cols=list()
-j=0.01
+j=0.1
 for i in num_windows: #here, check code 
 	col='rollingV_%s' %i
 	col_2='rollingV_diff_%s' %i 
 	col_3='rollingV_ind_%s' %i 
-	df[col]=df['V'].rolling(i,min_periods=3).mean()
+	df[col]=df['V'].rolling(i,min_periods=i).mean()
 	#v_cols=v_cols.append(col) #append has error , debug here 
 	df[col_2]=(df[col]-df[col].shift(1))/df[col].shift(1)
 	df[col_3]=np.where(df[col_2]>j, 1, 0)
 
 i2=12
-j2=0.001
+j2=0.01
 col_4='price_ind_%s' %i2
 df[col_4]=np.where((df['C']-df['C'].shift(12))/df['C'].shift(12)>j2,1,0)
 
 df['ind_both']=df['rollingV_ind_12']* df['price_ind_12']
+df['buy_ind']=np.where((df['ind_both']-df['ind_both'].shift(1)==1),1,0)
 
 #sell: find the buy signal, loop after the buy signal to get sell position, get signal 
-df['buy_ind']=np.where((df['ind_both']-df['ind_both'].shift(1)==1),1,0)
 
 price_buy=np.nan
 price_peak=np.nan
 df['sell_ind']=0
 df['buy_new']=0
 df['holding_status']=0
+df['price_buy']=np.nan
+df['price_peak']=np.nan
 
+thre_drop = 0.01
+df_tmp=df[0:len(df)]
 
-for i,data in df.iterrows():
+start_time = time.time()
+for i,data_i in df_tmp.iterrows():
 	row_i=df.index.get_loc(i)
+	print row_i
 	if(row_i==0):
 		df.loc[i,'sell_ind']=0
 	elif(row_i>0):
 		index_previous=df.index[row_i-1]
 		holding_status= (df.loc[:index_previous,'buy_new'] - df.loc[:index_previous,'sell_ind']).sum()
 		df.loc[i,'holding_status']=holding_status
-		if holding_status==0 and data['buy_ind']==1:
+		if holding_status==0 and data_i['buy_ind']==1:
 			df.loc[i,'buy_new']=1 
-			price_buy=data['C']
-			price_peak = data['C']
-		if holding_status==0 and data['C']> price_peak:
-			price_peak = data['C']
-		elif holding_status == 1 and (data['C']-price_buy)/price_buy<-0.2 and (data['C']-price_peak)/price_peak<-0.1: 
-			df.loc[i,'sell_ind']=1
+			print data_i
+			price_buy=data_i['C']
+			price_peak = data_i['C']
+		elif holding_status==1:
+			if holding_status == 1 and (data_i['C']-price_buy)/price_buy<-thre_drop and (data_i['C']-price_peak)/price_peak<-0.1: 
+				print data_i
+				df.loc[i,'sell_ind']=1
+				price_buy=np.nan
+				price_peak=np.nan
+			elif data_i['C']> price_peak:
+				price_peak = data_i['C']
+		df.loc[i,'price_buy']=price_buy
+		df.loc[i,'price_peak']=price_peak
 
+elapsed_time = time.time() - start_time
 #next, get one trading pair and test 
 
 
-		
+df['mystrategy_shi'] = df['holding_status'].shift(1) *df['returns']
+col_name=['returns', 'mystrategy_shi']
+df[col_name].dropna().cumsum().apply(np.exp).plot()
+plt.title('buy 1%, sell 1%')
+return_vec=df[col_name].dropna().cumsum().apply(np.exp)
+	
+	
+col_name=['buy_new']
+
+df[col_name].plot()
 
 
 
