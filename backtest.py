@@ -71,7 +71,9 @@ df['price_peak']=np.nan
 thre_drop = 0.01
 df_tmp=df[0:len(df)]
 
-start_time = time.time()
+df_tmp=df[290:305]
+
+#start_time = time.time()
 for i,data_i in df_tmp.iterrows():
 	row_i=df.index.get_loc(i)
 	print row_i
@@ -80,6 +82,9 @@ for i,data_i in df_tmp.iterrows():
 	elif(row_i>0):
 		index_previous=df.index[row_i-1]
 		holding_status= (df.loc[:index_previous,'buy_new'] - df.loc[:index_previous,'sell_ind']).sum()
+		print holding_status
+		print data_i['buy_new']
+		print data_i['sell_ind']
 		df.loc[i,'holding_status']=holding_status
 		if holding_status==0 and data_i['buy_ind']==1:
 			df.loc[i,'buy_new']=1 
@@ -97,24 +102,33 @@ for i,data_i in df_tmp.iterrows():
 		df.loc[i,'price_buy']=price_buy
 		df.loc[i,'price_peak']=price_peak
 
-elapsed_time = time.time() - start_time
+#elapsed_time = time.time() - start_time
 #next, get one trading pair and test 
 
+#next, save the data to a file; python editor; 
 
 df['mystrategy_shi'] = df['holding_status'].shift(1) *df['returns']
 col_name=['returns', 'mystrategy_shi']
 df[col_name].dropna().cumsum().apply(np.exp).plot()
 plt.title('buy 1%, sell 1%')
 return_vec=df[col_name].dropna().cumsum().apply(np.exp)
-	
+
+col_name=['holding_status']	
+df[col_name].plot()
 	
 col_name=['buy_new']
 
 df[col_name].plot()
 
+#debug, nothing wrong, just rerun it; 
 
+df.loc[lambda df: df.holding_status < 0, :]
+df.index.get_loc('2017-08-18 07:45:00')
 
+col_names=['buy_ind','buy_new', 'sell_ind', 'holding_status']
+df_new=df[col_names]
 
+df_new[290:305]
 
 ##########################
 #test stance idea , not the same as using 'signal'
