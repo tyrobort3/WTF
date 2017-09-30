@@ -1,0 +1,187 @@
+from __future__ import print_function
+
+import os
+import json
+import boto3
+import time
+
+from time import sleep
+from datetime import datetime, timedelta
+from urllib2 import urlopen
+from botocore.exceptions import ClientError
+from boto3.dynamodb.conditions import Key, Attr
+
+MARKETDATAURL = os.environ['site']  # URL of the site to check, stored in the site environment variable, e.g. https://aws.amazon.com
+EXPECTED = os.environ['expected']  # String expected to be on the page, stored in the expected environment variable, e.g. Amazon
+MARKETNAME = os.environ['marketName']
+TIMESTAMP = os.environ['timeStamp']
+INDIVIDUALSUMMARYPREFIX = os.environ['individualSummaryPrefix']
+INDIVIDUALSUMMARYPOSTFIX = os.environ['individualSummaryPostfix']
+MARKETLIMIT = os.environ['marketLimit']
+
+dynamodb = boto3.resource('dynamodb')
+holdingStatusTable = dynamodb.Table('MarketHoldingStatus')
+
+def validateSiteData(rawMarketData):
+    checkResult = rawMarketData['success']
+    return EXPECTED == str(checkResult)
+
+def retrieveMarketHistoricalData(rawMarketData):
+    marketHistoricalData = dict()
+    print('Total number of market is {}'.format(str(len(rawMarketData['result']))))
+    listOfMarket = getListOfMarket(rawMarketData)
+    
+    timeStop = str(datetime.now() - timedelta(hours = 1)).replace(' ', 'T')
+    
+    marketLimit = int(MARKETLIMIT)
+    for market in listOfMarket:
+        print(market)
+        individualMarketUrl = INDIVIDUALSUMMARYPREFIX + market + INDIVIDUALSUMMARYPOSTFIX
+        unfilledData = json.loads(urlopen(individualMarketUrl).read())['result']
+        
+        # Fill missing data
+        # filledData = fillMissingData(unfilledData, timeStop)
+        marketHistoricalData[market] = unfilledData
+        
+        # Need to break before running limit
+        marketLimit = marketLimit - 1
+        if (marketLimit <= 0):
+            break
+    
+    return marketHistoricalData
+
+def generateSellingCandidates(marketHistoricalData):
+    sellingCandidates = list()
+    
+    return sellingCandidates
+    
+def generateBuyingCandidates(marketHistoricalData):
+    buyingCandidates = list()
+    
+    return buyingCandidates
+
+def setHoldingStatus(marketName, holdingStatus, buyPrice, peakPrice):
+    newPeakPrice = str()
+    newBuyPrice = str()
+    if (holdingStatus == 'False'):
+        newPeakPrice = '0'
+        newBuyPrice = '0'
+    else:
+        currentHoldingStatus = getHoldingStatus(marketName)
+        # Update peak Price
+        if (currentHoldingStatus['PeakPrice'] >= str(peakPrice)):
+            newPeakPrice = currentHoldingStatus['PeakPrice']
+        else:
+            newPeakPrice = str(peakPrice)
+        # Will not update buy price
+        if (currentHoldingStatus['BuyPrice'] == '0'):
+            newBuyPrice = str(buyPrice)
+        else:
+            newBuyPrice = currentHoldingStatus['BuyPrice']
+            
+    holdingStatusTable.put_item(
+            Item = {
+                'MarketName': marketName,
+                'TimeStamp': str(datetime.now()),
+                'HoldingStatus': holdingStatus,
+                'BuyPrice': newBuyPrice,
+                'PeakPrice': newPeakPrice
+            }
+        )
+
+def getHoldingStatus(marketName):
+    response = holdingStatusTable.query(
+            KeyConditionExpression=Key(MARKETNAME).eq(marketName)
+        )
+        
+    return response['Items'][0]
+
+# def fillMissingData(unfilledData, timeStop):
+#     filledData = list()
+#     print(str(len(unfilledData)) + ' ' + timeStop)
+    
+#     # Only cut at the time we are interested
+#     cutUnfilledData = list()
+#     for record in reversed(unfilledData):
+#         if (record['T'] > timeStop):
+#             cutUnfilledData.append(record)
+#         else:
+#             break
+    
+#     # Catch how many minutes in between
+#     startTime = cutUnfilledData[-1]['T']
+#     endTime = cutUnfilledData[0]['T']
+#     print(type(startTime))
+#     print(startTime + ' ' + endTime)
+#     print(str(len(cutUnfilledData)))
+    
+#     formattedStartTime = datetime.strptime(startTime, "%Y-%m-%dT%H:%M:%S")
+#     formattedEndTime = datetime.strptime(endTime, "%Y-%m-%dT%H:%M:%S")
+#     print(formattedStartTime)
+#     print(formattedEndTime)
+#     numOfMinutes = (formattedEndTime - formattedStartTime).seconds / 60
+#     print(numOfMinutes)
+    
+    
+#     # for i in range(0 : numOfMinutes):
+        
+    
+    
+#     return filledData
+
+def getListOfMarket(rawMarketData):
+    listOfMarket = list()
+    for record in rawMarketData['result']:
+        listOfMarket.append(record[MARKETNAME])
+    
+    return listOfMarket
+
+def lambda_handler(event, context):
+    print('Checking {} at {}...'.format(MARKETDATAURL, str(datetime.now())))
+    try:
+        rawMarketData = json.loads(urlopen(MARKETDATAURL).read())
+        if not validateSiteData(rawMarketData):
+            raise Exception('Validation failed')
+        
+        # RetrieveMarketHistoricalData
+        marketHistoricalData = retrieveMarketHistoricalData(rawMarketData)
+        
+        # GenerateTradingCandidates
+        sellingCandidates = generateSellingCandidates(marketHistoricalData)
+        buyingCandidates = generateBuyingCandidates(marketHistoricalData)
+        
+        # Selling
+        # Buying
+        
+        # Testing on how to use setHoldingStatus and getHoldingStatus
+        setHoldingStatus('BTC-1ST', 'False', 13.5, 15)
+        holdingStatus = getHoldingStatus('BTC-1ST')
+        print(holdingStatus)
+        
+        setHoldingStatus('BTC-1ST', 'True', 1, 1)
+        holdingStatus = getHoldingStatus('BTC-1ST')
+        print(holdingStatus)
+        
+        setHoldingStatus('BTC-1ST', 'True', 2, 12.5)
+        holdingStatus = getHoldingStatus('BTC-1ST')
+        print(holdingStatus)
+        
+        setHoldingStatus('BTC-1ST', 'True', 3, 11)
+        holdingStatus = getHoldingStatus('BTC-1ST')
+        print(holdingStatus) 
+        
+        setHoldingStatus('BTC-1ST', 'False', 4, 15)
+        holdingStatus = getHoldingStatus('BTC-1ST')
+        print(holdingStatus)
+        
+    except Exception:
+        print('Check failed!')
+        raise
+    except ClientError as e:
+        print(e)
+        raise
+    else:
+        print('Check passed!')
+        return str(datetime.now())
+    finally:
+        print('Check complete at {}'.format(str(datetime.now())))
